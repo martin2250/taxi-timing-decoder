@@ -70,30 +70,53 @@ end_of_trace:
     return frames;
 }
 
+// simple 4 bit checksum by adding all nibbles and wrapping the carry bit, similar to internet checksum
+uint64_t checksum_4b(uint64_t v) {
+    uint64_t checksum = 0;
+    for (int i = 0; i < 16; i++) {
+        checksum = (checksum & 0xF) + (v & 0xF) + (checksum >> 4);
+        v >>= 4;
+    }
+    checksum = (checksum & 0xF) + (checksum >> 4);
+    return checksum;
+}
+
 // only for testing
 #include <fstream>
 int main(int argc, char **argv) {
     double interval = 1.6000000213622911e-09;
-    double bit_length = 1 / 25e6 / interval;
+    double baud_rate = 125e6 / 2;
+    double bit_length = 1 / baud_rate / interval;
     std::vector<uint16_t> data;
     // load data from file
-    std::ifstream infile("test.txt");
+    std::ifstream infile("test.vcd.txt");
     uint16_t value;
     while (infile >> value) {
         data.push_back(value);
     }
     // decode
-    auto frames = decode_taxi_time(data, bit_length, 35, 128);
+    auto frames = decode_taxi_time(data, bit_length, 41, 128);
     // print
     for (auto frame : frames) {
         size_t index = std::get<0>(frame);
         uint64_t code = std::get<1>(frame);
 
-        uint64_t whole = code >> 19;
-        uint64_t fractional = code & ((1 << 19) - 1);
+        uint64_t checksum = code & ((1 << 4) - 1);
+        code >>= 4;
+        
+        uint64_t checksum_calc = checksum_4b(code);
+        if (checksum != checksum_calc) {
+            std::cout << "checksum mismatch " << checksum << " " << checksum_calc << std::endl;
+        }
+
+        uint64_t fractional = code & ((1 << 20) - 1);
+        code >>= 20;
+        uint64_t whole = code & ((1 << 17) - 1);
+        code >>= 17;
+
         double time =
-            static_cast<double>(whole) + static_cast<double>(fractional) * 2e-6;
-        std::cout << index << " " << std::fixed << std::setprecision(6)
-                    << time << std::endl;
+            static_cast<double>(whole) + static_cast<double>(fractional) * 1e-6;
+        std::cout << index << " " << std::fixed << std::setprecision(6) << time
+                  << std::endl;
     }
 }
