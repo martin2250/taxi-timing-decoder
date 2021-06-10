@@ -13,8 +13,8 @@
  * @param num_bits number of bits in a frame
  * @param threshold threshold for high / low
  *
- * @return list of successfully decoded frames, as tuples of <sample_index,
- * frame_data>
+ * @return list of successfully decoded frames, as tuples of
+ * <sample_index, frame_data, number of bits with differing samples>
  */
 std::vector<std::tuple<size_t, uint64_t, size_t>> decode_taxi_time(
     std::vector<uint16_t> trace, double bit_length, size_t num_bits,
@@ -22,8 +22,8 @@ std::vector<std::tuple<size_t, uint64_t, size_t>> decode_taxi_time(
     // gap between frames
     const double frame_gap = bit_length * 9.5;
     // sample trace at multiple points to detect errors
-    const size_t SAMPLES = 5;
-    const double sample_points[SAMPLES] = {0.3, 0.4, 0.5, 0.6, 0.7};
+    const size_t SAMPLES = 3;
+    const double sample_points[SAMPLES] = {0.35, 0.5, 0.65};
     // start index of current frame
     size_t index_start = 0;
     std::vector<std::tuple<size_t, uint64_t, size_t>> frames = {};
@@ -122,7 +122,7 @@ int main(int argc, char **argv) {
         size_t index = std::get<0>(frame);
         uint64_t code = std::get<1>(frame);
         uint64_t bit_errors = std::get<2>(frame);
-        
+
         if (bit_errors > 0) {
             std::cout << bit_errors << " bit errors" << std::endl;
         }
@@ -143,7 +143,9 @@ int main(int argc, char **argv) {
 
         double time =
             static_cast<double>(whole) + static_cast<double>(fractional) * 1e-6;
-        std::cout << index << " " << std::fixed << std::setprecision(6) << time
-                  << std::endl;
+        double index_time = static_cast<double>(index) * interval;
+
+        std::cout << std::fixed << std::setprecision(8) << index_time << " ";
+        std::cout << std::setprecision(6) << time << std::endl;
     }
 }
