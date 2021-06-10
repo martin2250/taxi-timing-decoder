@@ -16,12 +16,17 @@
  * @return list of successfully decoded frames, as tuples of <sample_index,
  * frame_data>
  */
-std::vector<std::tuple<int, uint64_t>> decode_taxi_time(
+std::vector<std::tuple<size_t, uint64_t, size_t>> decode_taxi_time(
     std::vector<uint16_t> trace, double bit_length, size_t num_bits,
     uint16_t threshold) {
-    const double frame_gap = bit_length * 9.5;  // gap between frames
-    size_t index_start = 0;                     // start index of current frame
-    std::vector<std::tuple<int, uint64_t>> frames = {};
+    // gap between frames
+    const double frame_gap = bit_length * 9.5;
+    // sample trace at multiple points to detect errors
+    const size_t SAMPLES = 5;
+    const double sample_points[SAMPLES] = {0.3, 0.4, 0.5, 0.6, 0.7};
+    // start index of current frame
+    size_t index_start = 0;
+    std::vector<std::tuple<size_t, uint64_t, size_t>> frames = {};
     while (true) {
         // find interframe gap (no edges for > frame_gap)
         size_t last_edge_index = index_start;
@@ -47,30 +52,46 @@ std::vector<std::tuple<int, uint64_t>> decode_taxi_time(
     frame_start:
         // frame found, decode frame
         uint64_t code = 0;
+        size_t num_bit_errors = 0;
         for (size_t i_bit = 0; i_bit < num_bits; i_bit++) {
-            // skip synchronization bits (every eight bit)
-            size_t i_bit_eff = i_bit + i_bit / 8;
-            // sample frame between edges, starting at the first data bit
-            double index_offset =
-                (static_cast<double>(i_bit_eff) + 1.5) * bit_length;
-            size_t i_sample = index_start + static_cast<size_t>(index_offset);
-            // check bounds
-            if (i_sample > trace.size()) {
-                goto end_of_trace;
+            // effective bit index, skip start and synchronization bits (every
+            // eight bit)
+            size_t i_bit_eff = 1 + i_bit + i_bit / 8;
+            // count number of samples that exceed threshold
+            uint samples_high = 0;
+            for (size_t i_sample = 0; i_sample < SAMPLES; i_sample++) {
+                // sample bit at <SAMPLES> points, skip start bit
+                double index_offset =
+                    static_cast<double>(i_bit_eff) + sample_points[i_sample];
+                size_t index_sample =
+                    index_start +
+                    static_cast<size_t>(index_offset * bit_length);
+                // check bounds
+                if (index_sample > trace.size()) {
+                    goto end_of_trace;
+                }
+                if (trace[index_sample] > threshold) {
+                    samples_high += 1;
+                }
             }
-            // sample
+            // check for errors
+            if ((samples_high != 0) && (samples_high != SAMPLES)) {
+                num_bit_errors += 1;
+            }
+            // store sample in code
             code <<= 1;
-            if (trace[i_sample] > threshold) {
+            if (samples_high > (SAMPLES / 2)) {
                 code |= 1;
             }
         }
-        frames.push_back({index_start, code});
+        frames.push_back({index_start, code, num_bit_errors});
     }
 end_of_trace:
     return frames;
 }
 
-// simple 4 bit checksum by adding all nibbles and wrapping the carry bit, similar to internet checksum
+// simple 4 bit checksum by adding all nibbles and wrapping the carry bit,
+// similar to internet checksum
 uint64_t checksum_4b(uint64_t v) {
     uint64_t checksum = 0;
     for (int i = 0; i < 16; i++) {
@@ -100,13 +121,19 @@ int main(int argc, char **argv) {
     for (auto frame : frames) {
         size_t index = std::get<0>(frame);
         uint64_t code = std::get<1>(frame);
+        uint64_t bit_errors = std::get<2>(frame);
+        
+        if (bit_errors > 0) {
+            std::cout << bit_errors << " bit errors" << std::endl;
+        }
 
         uint64_t checksum = code & ((1 << 4) - 1);
         code >>= 4;
-        
+
         uint64_t checksum_calc = checksum_4b(code);
         if (checksum != checksum_calc) {
-            std::cout << "checksum mismatch " << checksum << " " << checksum_calc << std::endl;
+            std::cout << "checksum mismatch " << checksum << " "
+                      << checksum_calc << std::endl;
         }
 
         uint64_t fractional = code & ((1 << 20) - 1);
